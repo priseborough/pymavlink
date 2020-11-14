@@ -26,21 +26,27 @@ def flight_time(logfile):
     mlog = mavutil.mavlink_connection(filename)
 
     in_air = False
+    isFlying = False
     start_time = 0.0
     total_time = 0.0
     total_dist = 0.0
     t = None
     last_msg = None
     last_time_usec = None
+    status = 0
 
     while True:
         m = mlog.recv_match(type=['GPS','GPS_RAW_INT'], condition=args.condition)
-        if m is None:
+        mstatus = mlog.recv_match(type=['STAT'], condition=args.condition)
+        if ((mstatus is None) and (m is None)):
             if in_air:
                 total_time += time.mktime(t) - start_time
             if total_time > 0:
                 print("Flight time : %u:%02u" % (int(total_time)/60, int(total_time)%60))
             return (total_time, total_dist)
+        if mstatus.get_type() == 'STAT':
+            isFlying = mstatus.isFlying
+            time_usec = mstatus.TimeUS
         if m.get_type() == 'GPS_RAW_INT':
             groundspeed = m.vel*0.01
             status = m.fix_type
@@ -52,11 +58,11 @@ def flight_time(logfile):
         if status < 3:
             continue
         t = time.localtime(m._timestamp)
-        if groundspeed > args.groundspeed and not in_air:
+        if (groundspeed > args.groundspeed or isFlying) and not in_air:
             print("In air at %s (percent %.0f%% groundspeed %.1f)" % (time.asctime(t), mlog.percent, groundspeed))
             in_air = True
             start_time = time.mktime(t)
-        elif groundspeed < args.groundspeed and in_air:
+        elif (groundspeed < args.groundspeed and not isFlying) and in_air:
             print("On ground at %s (percent %.1f%% groundspeed %.1f  time=%.1f seconds)" % (
                 time.asctime(t), mlog.percent, groundspeed, time.mktime(t) - start_time))
             in_air = False
